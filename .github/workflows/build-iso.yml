@@ -1,0 +1,61 @@
+name: Gerar ISO de instalação
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-iso:
+    # O Ubuntu 26.04 tem um perfil AppArmor do bwrap que quebra o osbuild
+    # dentro do container do image-builder. A 24.04 é a versão validada.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+
+      - name: Liberar espaço em disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}"
+          df -h
+
+      - name: Instalar o Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          podman --version
+
+      - name: Validar o build.conf
+        run: ./scripts/build-iso.sh --check
+
+      - name: Gerar o ISO
+        run: sudo ./scripts/build-iso.sh
+
+      - name: Publicar o ISO como artefato único (90 dias)
+        uses: actions/upload-artifact@v7
+        with:
+          path: output/*.iso
+          archive: false
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Resumo
+        run: |
+          ISO="$(find output -maxdepth 1 -type f -name '*.iso' | head -n1)"
+          echo "### ISO gerado" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baixe **$(basename "$ISO")** na seção **Artifacts** desta execução." >> "$GITHUB_STEP_SUMMARY"
